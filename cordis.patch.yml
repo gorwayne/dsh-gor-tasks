@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-gor-tasks
+      name: '@gorwayne/dsh-gor-tasks'

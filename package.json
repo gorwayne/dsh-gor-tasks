@@ -1,0 +1,45 @@
+{
+  "name": "@gorwayne/dsh-gor-tasks",
+  "version": "1.1.0",
+  "type": "module",
+  "description": "DSH 待办任务 · 项目化任务管理 / Project-based task manager for DeepSeek Harness",
+  "license": "MIT",
+  "author": "gorwayne",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gorwayne/dsh-gor-tasks.git"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "todo",
+    "task-manager",
+    "project-management"
+  ],
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale",
+    "icon.svg",
+    "assets",
+    "screenshots.json"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}
