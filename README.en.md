@@ -39,6 +39,10 @@ Chats are lively, but the actual work ends up scattered across messages. This pl
 
 ![Settings](docs/images/03-settings.png)
 
+**Dark mode** — every colour comes from DSH theme variables, so it follows the host light/dark setting automatically.
+
+![Dark mode](docs/images/04-dark-panel.png)
+
 ---
 
 ## Features
@@ -54,6 +58,7 @@ Chats are lively, but the actual work ends up scattered across messages. This pl
 | Manage from chat | 9 tools: list/create/update/delete projects and tasks, plus bulk add |
 | Split an answer | "Split into tasks" in the message action row, using your own model or a no-model line split |
 | Settings | Model split toggle, due reminder toggle and lead days, data import/export |
+| Light/dark | All colours come from DSH theme variables; follows the host theme (including "follow system") |
 | Portable data | Export projects + tasks + settings as JSON, import on another machine |
 
 ---
