@@ -13,6 +13,8 @@ window.__ModuleLoader__.load({
     const ENDPOINT = 'dsh-gor-tasks/tasks';
 
     const STATUS_LABEL = { todo: '待办', doing: '进行中', blocked: '受阻', done: '已完成' };
+    const BOARD_COLUMNS = ['todo', 'doing', 'blocked', 'done'];
+    const VIEW_KEY = 'gor-tasks.view';
     const PRIORITY_LABEL = { low: '低', normal: '普通', high: '高', urgent: '紧急' };
     const PRIORITY_COLOR = { low: '#8b8fa3', normal: '#5b8def', high: '#e8933a', urgent: '#e5564b' };
 
@@ -121,6 +123,27 @@ window.__ModuleLoader__.load({
 .zs-opt small{color:var(--dsw-alias-label-tertiary,#8b8fa3);font-size:11px}
 .zs-icon-wrap{position:relative;display:inline-flex;align-items:center;justify-content:center}
 .zs-due-badge{margin-left:auto;flex:none;min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--dsw-alias-state-error-primary,#e5564b);color:var(--dsw-alias-label-primary-foreground,#fff);font-size:11px;font-weight:600;line-height:18px;text-align:center;box-sizing:border-box}
+.zs-views{display:inline-flex;gap:2px;background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.06));padding:3px;border-radius:9px;flex:0 0 auto}
+.zs-view{width:27px;height:22px;display:inline-flex;align-items:center;justify-content:center;border-radius:7px;border:0;background:transparent;padding:0;cursor:pointer;color:var(--dsw-alias-label-tertiary,#8b8fa3)}
+.zs-view:hover{color:var(--dsw-alias-label-primary,#1d1e22)}
+.zs-view.on{background:var(--dsw-alias-bg-layer-1,#fff);color:var(--dsw-alias-label-primary,#1d1e22);box-shadow:0 1px 2px rgba(0,0,0,.1)}
+.zs-board{display:flex;gap:10px;padding:12px 14px 16px;overflow:auto;align-items:stretch;flex:1;min-height:0}
+.zs-kcol{flex:1 1 0;min-width:168px;background:var(--dsw-alias-interactive-bg-hover,rgba(0,0,0,.04));border-radius:10px;padding:8px;display:flex;flex-direction:column;gap:8px}
+.zs-kcol.over{outline:2px dashed var(--dsw-alias-brand-primary,#2f6bff);outline-offset:-2px}
+.zs-khead{display:flex;align-items:center;gap:6px;padding:2px 4px;font-size:12px;font-weight:600;color:var(--dsw-alias-label-secondary,#55596a)}
+.zs-kcount{margin-left:auto;font-size:11px;font-weight:400;color:var(--dsw-alias-label-tertiary,#8b8fa3)}
+.zs-kdot{width:7px;height:7px;border-radius:50%;flex:0 0 7px}
+.zs-kdot.todo{background:var(--dsw-alias-label-tertiary,#8b8fa3)}
+.zs-kdot.doing{background:var(--dsw-alias-brand-primary,#2f6bff)}
+.zs-kdot.blocked{background:var(--dsw-alias-state-error-primary,#d9382b)}
+.zs-kdot.done{background:var(--dsw-alias-state-success-primary,#22c55e)}
+.zs-card{background:var(--dsw-alias-bg-layer-1,#fff);border:1px solid var(--dsw-alias-border-l2,#e0e2ea);border-radius:9px;padding:8px 9px;cursor:pointer;display:flex;flex-direction:column;gap:5px;box-shadow:0 1px 2px rgba(0,0,0,.05)}
+.zs-card:hover{border-color:var(--dsw-alias-border-l3,#c3c7d4)}
+.zs-card.dragging{opacity:.45}
+.zs-card .zs-tt{font-size:13px;line-height:1.45;word-break:break-word}
+.zs-kempty{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b8fa3);padding:4px 4px 2px}
+@container (max-width:900px){.zs-kcol{min-width:170px}}
+@container (max-width:640px){.zs-board{padding:10px 8px 16px;gap:8px}.zs-kcol{min-width:150px}}
 
 body[data-ds-dark-theme] .zs-root{color-scheme:dark}
 `;
@@ -273,8 +296,36 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
           }, '✕')));
     }
 
-    function TaskRow({ task, project, onToggle, onOpen }) {
+    function TaskMeta({ task, project }) {
       const due = dueInfo(task.due);
+      return h('div', { className: 'zs-meta' },
+        h('span', { className: 'zs-chip' },
+          h('span', { className: 'zs-dot', style: { background: project?.color || '#8b8fa3' } }),
+          project?.name ?? '收集箱'),
+        h('span', { className: 'zs-flag' },
+          h('span', { className: 'zs-pdot', style: { background: PRIORITY_COLOR[task.priority] || '#8b8fa3' } }),
+          PRIORITY_LABEL[task.priority] ?? '普通'),
+        task.status === 'doing' ? h('span', { className: 'zs-flag', style: { color: '#2f6bff' } }, '进行中') : null,
+        task.status === 'blocked' ? h('span', { className: 'zs-flag', style: { color: '#d9382b' } }, '受阻') : null,
+        due ? h('span', { className: 'zs-flag', style: { color: due.color } }, due.text) : null,
+        task.notes
+          ? h('span', {
+            className: 'zs-flag zs-notes-flag',
+            title: task.notes.length > 60 ? `${task.notes.slice(0, 60)}…` : task.notes,
+            'aria-label': '有说明',
+          },
+            h('svg', {
+              width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
+              strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true',
+            },
+              h('path', { d: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z' }),
+              h('path', { d: 'M14 3v5h5' }),
+              h('path', { d: 'M9 13h6' }),
+              h('path', { d: 'M9 17h4' })))
+          : null);
+    }
+
+    function TaskRow({ task, project, onToggle, onOpen }) {
       return h('div', { className: 'zs-task' },
         h('div', {
           className: `zs-check${task.status === 'done' ? ' on' : ''}`,
@@ -284,31 +335,19 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
         }, task.status === 'done' ? '✓' : ''),
         h('div', { className: 'zs-tbody', onClick: () => onOpen(task) },
           h('div', { className: `zs-tt${task.status === 'done' ? ' done' : ''}` }, task.title || '(无标题)'),
-          h('div', { className: 'zs-meta' },
-            h('span', { className: 'zs-chip' },
-              h('span', { className: 'zs-dot', style: { background: project?.color || '#8b8fa3' } }),
-              project?.name ?? '收集箱'),
-            h('span', { className: 'zs-flag' },
-              h('span', { className: 'zs-pdot', style: { background: PRIORITY_COLOR[task.priority] || '#8b8fa3' } }),
-              PRIORITY_LABEL[task.priority] ?? '普通'),
-            task.status === 'doing' ? h('span', { className: 'zs-flag', style: { color: '#2f6bff' } }, '进行中') : null,
-            task.status === 'blocked' ? h('span', { className: 'zs-flag', style: { color: '#d9382b' } }, '受阻') : null,
-            due ? h('span', { className: 'zs-flag', style: { color: due.color } }, due.text) : null,
-            task.notes
-              ? h('span', {
-                className: 'zs-flag zs-notes-flag',
-                title: task.notes.length > 60 ? `${task.notes.slice(0, 60)}…` : task.notes,
-                'aria-label': '有说明',
-              },
-                h('svg', {
-                  width: 13, height: 13, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor',
-                  strokeWidth: 1.7, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': 'true',
-                },
-                  h('path', { d: 'M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z' }),
-                  h('path', { d: 'M14 3v5h5' }),
-                  h('path', { d: 'M9 13h6' }),
-                  h('path', { d: 'M9 17h4' })))
-              : null)));
+          h(TaskMeta, { task, project })));
+    }
+
+    function TaskCard({ task, project, dragging, onDragStart, onDragEnd, onOpen }) {
+      return h('div', {
+        className: `zs-card${dragging ? ' dragging' : ''}`,
+        draggable: true,
+        onDragStart,
+        onDragEnd,
+        onClick: () => onOpen(task),
+      },
+        h('div', { className: `zs-tt${task.status === 'done' ? ' done' : ''}` }, task.title || '(无标题)'),
+        h(TaskMeta, { task, project }));
     }
 
     function Editor({ task, projects, onClose, onSave, onDelete, saving }) {
@@ -574,6 +613,15 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
       const [projectId, setProjectId] = React.useState('all');
       const [filter, setFilter] = React.useState('open');
       const [query, setQuery] = React.useState('');
+      const [view, setViewState] = React.useState(() => {
+        try { return localStorage.getItem(VIEW_KEY) === 'board' ? 'board' : 'list'; } catch { return 'list'; }
+      });
+      const [cardDrag, setCardDrag] = React.useState('');
+      const [dropCol, setDropCol] = React.useState('');
+      const setView = (next) => {
+        setViewState(next);
+        try { localStorage.setItem(VIEW_KEY, next); } catch { /* 忽略隐私模式下的写入失败 */ }
+      };
       const [editing, setEditing] = React.useState(null);
       const [saving, setSaving] = React.useState(false);
       const [creatingProject, setCreatingProject] = React.useState(false);
@@ -603,6 +651,32 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
           return (a.due ?? '9999-99-99').localeCompare(b.due ?? '9999-99-99') || a.order - b.order;
         });
       }, [tasks, projectId, filter, query]);
+
+      // 看板不按状态过滤（列本身就是状态），项目与搜索照旧生效
+      const boardTasks = React.useMemo(() => {
+        let list = tasks.slice();
+        if (projectId !== 'all') list = list.filter((task) => task.projectId === projectId);
+        if (query.trim()) {
+          const needle = query.trim().toLowerCase();
+          list = list.filter((task) => `${task.title} ${task.notes}`.toLowerCase().includes(needle));
+        }
+        const order = { urgent: 0, high: 1, normal: 2, low: 3 };
+        return list.sort((a, b) => {
+          const byPriority = (order[a.priority] ?? 2) - (order[b.priority] ?? 2);
+          if (byPriority !== 0) return byPriority;
+          return (a.due ?? '9999-99-99').localeCompare(b.due ?? '9999-99-99') || a.order - b.order;
+        });
+      }, [tasks, projectId, query]);
+
+      const moveStatus = async (task, status) => {
+        if (!task || task.status === status) return;
+        try {
+          await rpc('task.save', { task: { ...task, status } });
+          await refresh();
+        } catch (err) {
+          toast(`改状态失败：${err?.message ?? err}`);
+        }
+      };
 
       const save = async (draft) => {
         if (!String(draft.title ?? '').trim()) return;
@@ -737,12 +811,36 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
               value: query,
               onChange: (event) => setQuery(event.target.value),
             }),
-            h('div', { className: 'zs-tabs' },
-              ['open', 'all', 'done'].map((key) => h('div', {
-                key,
-                className: `zs-tab${filter === key ? ' on' : ''}`,
-                onClick: () => setFilter(key),
-              }, key === 'open' ? '进行中' : key === 'all' ? '全部' : '已完成'))),
+            h('div', { className: 'zs-views' },
+              h('button', {
+                className: `zs-view${view === 'list' ? ' on' : ''}`,
+                title: '列表视图',
+                'aria-label': '列表视图',
+                'aria-pressed': view === 'list',
+                onClick: () => setView('list'),
+              },
+                h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', 'aria-hidden': 'true' },
+                  h('path', { d: 'M9 6h11M9 12h11M9 18h11' }),
+                  h('path', { d: 'M4 6h.01M4 12h.01M4 18h.01' }))),
+              h('button', {
+                className: `zs-view${view === 'board' ? ' on' : ''}`,
+                title: '看板视图',
+                'aria-label': '看板视图',
+                'aria-pressed': view === 'board',
+                onClick: () => setView('board'),
+              },
+                h('svg', { width: 14, height: 14, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.8, strokeLinecap: 'round', 'aria-hidden': 'true' },
+                  h('rect', { x: 3, y: 4, width: 4.5, height: 16, rx: 1.2 }),
+                  h('rect', { x: 9.75, y: 4, width: 4.5, height: 11, rx: 1.2 }),
+                  h('rect', { x: 16.5, y: 4, width: 4.5, height: 7.5, rx: 1.2 })))),
+            view === 'list'
+              ? h('div', { className: 'zs-tabs' },
+                ['open', 'all', 'done'].map((key) => h('div', {
+                  key,
+                  className: `zs-tab${filter === key ? ' on' : ''}`,
+                  onClick: () => setFilter(key),
+                }, key === 'open' ? '进行中' : key === 'all' ? '全部' : '已完成')))
+              : null,
             h('button', { className: 'zs-btn pri zs-newtask', onClick: () => setEditing(blankTask()) }, '+ 新建任务'),
             h('button', {
               className: 'zs-btn zs-gear',
@@ -756,19 +854,62 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
               },
                 h('circle', { cx: 12, cy: 12, r: 3 }),
                 h('path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' })))),
-          h('div', { className: 'zs-list' },
-            loading ? h('div', { className: 'zs-empty' }, '加载中…')
-              : error ? h('div', { className: 'zs-empty' }, `加载失败：${error}`)
-                : visible.length === 0
-                  ? h('div', { className: 'zs-empty' },
-                    filter === 'done' ? '还没有已完成的任务' : '这里还没有任务。点右上角「新建任务」，或者在对话里让 AI 帮你拆。')
-                  : visible.map((task) => h(TaskRow, {
-                    key: task.id,
-                    task,
-                    project: projects.find((project) => project.id === task.projectId),
-                    onToggle: toggle,
-                    onOpen: (item) => setEditing(item),
-                  })))),
+          view === 'board'
+            ? h('div', { className: 'zs-board' },
+              BOARD_COLUMNS.map((status) => {
+                const items = boardTasks.filter((task) => task.status === status);
+                return h('div', {
+                  key: status,
+                  className: `zs-kcol${dropCol === status ? ' over' : ''}`,
+                  onDragOver: (event) => {
+                    if (!cardDrag) return;
+                    event.preventDefault();
+                    if (dropCol !== status) setDropCol(status);
+                  },
+                  onDragLeave: () => { if (dropCol === status) setDropCol(''); },
+                  onDrop: (event) => {
+                    event.preventDefault();
+                    const task = tasks.find((item) => item.id === cardDrag);
+                    setDropCol('');
+                    setCardDrag('');
+                    if (task) void moveStatus(task, status);
+                  },
+                },
+                  h('div', { className: 'zs-khead' },
+                    h('span', { className: `zs-kdot ${status}` }),
+                    h('span', {}, STATUS_LABEL[status]),
+                    h('span', { className: 'zs-kcount' }, String(items.length))),
+                  items.length === 0
+                    ? h('div', { className: 'zs-kempty' }, cardDrag ? '放到这一列' : '暂无任务')
+                    : items.map((task) => h(TaskCard, {
+                      key: task.id,
+                      task,
+                      project: projects.find((project) => project.id === task.projectId),
+                      dragging: cardDrag === task.id,
+                      onDragStart: (event) => {
+                        setCardDrag(task.id);
+                        try {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('text/plain', task.id);
+                        } catch { /* 某些环境不允许写 dataTransfer */ }
+                      },
+                      onDragEnd: () => { setCardDrag(''); setDropCol(''); },
+                      onOpen: (item) => setEditing(item),
+                    })));
+              }))
+            : h('div', { className: 'zs-list' },
+              loading ? h('div', { className: 'zs-empty' }, '加载中…')
+                : error ? h('div', { className: 'zs-empty' }, `加载失败：${error}`)
+                  : visible.length === 0
+                    ? h('div', { className: 'zs-empty' },
+                      filter === 'done' ? '还没有已完成的任务' : '这里还没有任务。点右上角「新建任务」，或者在对话里让 AI 帮你拆。')
+                    : visible.map((task) => h(TaskRow, {
+                      key: task.id,
+                      task,
+                      project: projects.find((project) => project.id === task.projectId),
+                      onToggle: toggle,
+                      onOpen: (item) => setEditing(item),
+                    })))),
         editing ? h('div', { key: 'backdrop', className: 'zs-drawer-mask', onClick: () => setEditing(null) }) : null,
         editing ? h(Editor, {
           task: editing,

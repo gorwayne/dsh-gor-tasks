@@ -5,7 +5,7 @@
 **把「待办」放进 DeepSeek Harness：左侧入口、项目分类、对话里增删、回答一键拆成任务。**
 
 <img src="https://img.shields.io/badge/for-DeepSeek%20Harness-4176E6?style=flat" alt="DeepSeek Harness">
-<img src="https://img.shields.io/badge/version-1.1.0-2f6bff?style=flat" alt="1.1.0">
+<img src="https://img.shields.io/badge/version-1.2.0-2f6bff?style=flat" alt="1.1.0">
 <img src="https://img.shields.io/badge/license-MIT-3c9d6c?style=flat" alt="MIT">
 
 **中文** · [English](README.en.md)
@@ -43,6 +43,10 @@ DSH 里聊得很热闹，真正要动手的事却散在对话里。这个插件�
 
 ![深色模式](docs/images/04-dark-panel.png)
 
+**看板视图**：点工具栏的视图按钮切换，四列就是四种状态，卡片可以直接拖到别的列改状态。
+
+![看板视图](docs/images/05-board.png)
+
 ---
 
 ## 特性
@@ -55,6 +59,7 @@ DSH 里聊得很热闹，真正要动手的事却散在对话里。这个插件�
 | 拖拽排序 | 项目顺序即显示顺序，收集箱也可以拖 |
 | 任务字段 | 标题、说明、状态（待办/进行中/受阻/已完成）、优先级、截止日期 |
 | 过滤检索 | 全部任务 / 单项目、进行中 / 全部 / 已完成、关键字搜索 |
+| 两种视图 | 列表视图按状态分页签；看板视图四列分别对应待办 / 进行中 / 受阻 / 已完成，卡片可拖拽换状态，选择会记住 |
 | 对话里管理 | 9 个工具：建项目、列项目、建任务、批量建、改任务、删任务、列任务、删项目、改项目 |
 | 回答拆成任务 | 消息操作条上「拆成任务」，用你配置的模型拆分，也支持不调模型的按行粗拆 |
 | 系统设置 | 模型拆分开关、到期提醒开关与提前天数、数据导入导出 |

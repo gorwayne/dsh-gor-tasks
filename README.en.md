@@ -5,7 +5,7 @@
 **Put "things to do" inside DeepSeek Harness: a sidebar entry, project buckets, task edits from chat, and one click to turn an answer into tasks.**
 
 <img src="https://img.shields.io/badge/for-DeepSeek%20Harness-4176E6?style=flat" alt="DeepSeek Harness">
-<img src="https://img.shields.io/badge/version-1.1.0-2f6bff?style=flat" alt="1.1.0">
+<img src="https://img.shields.io/badge/version-1.2.0-2f6bff?style=flat" alt="1.1.0">
 <img src="https://img.shields.io/badge/license-MIT-3c9d6c?style=flat" alt="MIT">
 
 [中文](README.md) · **English**
@@ -43,6 +43,10 @@ Chats are lively, but the actual work ends up scattered across messages. This pl
 
 ![Dark mode](docs/images/04-dark-panel.png)
 
+**Board view** — flip the view switch in the toolbar; the four columns are the four statuses, and cards can be dragged between them to change status.
+
+![Board view](docs/images/05-board.png)
+
 ---
 
 ## Features
@@ -55,6 +59,7 @@ Chats are lively, but the actual work ends up scattered across messages. This pl
 | Drag to reorder | Project order is display order, Inbox included |
 | Task fields | Title, notes, status (todo / doing / blocked / done), priority, due date |
 | Filtering | All tasks or one project; doing / all / done; keyword search |
+| Two views | List view with status tabs; board view with one column per status — drag cards between columns, the choice is remembered |
 | Manage from chat | 9 tools: list/create/update/delete projects and tasks, plus bulk add |
 | Split an answer | "Split into tasks" in the message action row, using your own model or a no-model line split |
 | Settings | Model split toggle, due reminder toggle and lead days, data import/export |
