@@ -28,10 +28,13 @@
     "locale",
     "icon.svg",
     "assets",
-    "screenshots.json"
+    "screenshots.json",
+    "CHANGELOG.md"
   ],
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
     "client": {
       "platform": "web",
       "immediately": true,

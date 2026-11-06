@@ -5,7 +5,7 @@
 **把「待办」放进 DeepSeek Harness：左侧入口、项目分类、对话里增删、回答一键拆成任务。**
 
 <img src="https://img.shields.io/badge/for-DeepSeek%20Harness-4176E6?style=flat" alt="DeepSeek Harness">
-<img src="https://img.shields.io/badge/version-1.2.0-2f6bff?style=flat" alt="1.1.0">
+<img src="https://img.shields.io/badge/version-1.2.0-2f6bff?style=flat" alt="1.2.0">
 <img src="https://img.shields.io/badge/license-MIT-3c9d6c?style=flat" alt="MIT">
 
 **中文** · [English](README.en.md)
@@ -188,9 +188,16 @@ dsh-gor-tasks/
 ├── locale/             # zh.json / en.json
 ├── icon.svg            # 插件图标
 ├── docs/images/        # README 用的截图
+├── CHANGELOG.md        # 更新记录
 ├── LICENSE             # MIT
 └── README.md
 ```
+
+---
+
+## 更新记录
+
+见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 
