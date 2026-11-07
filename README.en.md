@@ -5,7 +5,7 @@
 **Put "things to do" inside DeepSeek Harness: a sidebar entry, project buckets, task edits from chat, and one click to turn an answer into tasks.**
 
 <img src="https://img.shields.io/badge/for-DeepSeek%20Harness-4176E6?style=flat" alt="DeepSeek Harness">
-<img src="https://img.shields.io/badge/version-1.2.0-2f6bff?style=flat" alt="1.2.0">
+<img src="https://img.shields.io/badge/version-1.3.0-2f6bff?style=flat" alt="1.3.0">
 <img src="https://img.shields.io/badge/license-MIT-3c9d6c?style=flat" alt="MIT">
 
 [中文](README.md) · **English**
@@ -59,8 +59,12 @@ Chats are lively, but the actual work ends up scattered across messages. This pl
 | Drag to reorder | Project order is display order, Inbox included |
 | Task fields | Title, notes, status (todo / doing / blocked / done), priority, due date |
 | Filtering | All tasks or one project; doing / all / done; keyword search |
+| Smart lists | Due today / next 7 days / overdue / high priority / no due date, one click from the sidebar with live counts |
+| Batch actions | Tick tasks (Shift to range-select, select all), then change status, move project or delete in one go |
+| Undo | Deleting a task, a project or a batch gives an 8-second undo that also restores task order |
+| Custom order | Switch the list view to "custom" and drag task rows; the choice is remembered |
 | Two views | List view with status tabs; board view with one column per status — drag cards between columns, the choice is remembered |
-| Manage from chat | 9 tools: list/create/update/delete projects and tasks, plus bulk add |
+| Manage from chat | 10 tools: list/create/update/delete projects and tasks, bulk add and bulk update |
 | Split an answer | "Split into tasks" in the message action row, using your own model or a no-model line split |
 | Settings | Model split toggle, due reminder toggle and lead days, data import/export |
 | Light/dark | All colours come from DSH theme variables; follows the host theme (including "follow system") |
@@ -104,10 +108,12 @@ Profile `package.json` (point the path at your clone):
 
 ### 1. The UI
 
-Click "Todo" in the sidebar to open three columns: projects on the left, tasks in the middle; clicking a task slides out the editor on the right.
-
+- Click "Todo" in the sidebar to open three columns: projects on the left, tasks in the middle; clicking a task slides out the editor on the right.
+- Besides "All tasks" and your projects, the sidebar has **smart lists**: due today, next 7 days, overdue, high priority, no due date;
 - "+ New task": title required, project / status / priority / due date optional;
 - hovering a project row reveals `✎` (rename), `✕` (delete) and `⋮⋮` (drag);
+- the small box on the left of a task row selects it (Shift for a range) and turns the toolbar into batch actions;
+- the top right of the list view switches between "default" and "custom" order — in custom mode drag rows to reorder;
 - the gear at the top right opens **Settings**.
 
 ### 2. Manage from chat
@@ -127,6 +133,7 @@ Tools:
 | `project_list` / `project_create` / `project_update` / `project_delete` | list, create, update, delete projects |
 | `task_list` / `task_create` / `task_update` / `task_delete` | list, create, update, delete tasks |
 | `task_bulk_add` | add several at once (this is what the split dialog uses) |
+| `task_bulk_update` | change status / priority / project / due date for many tasks at once |
 
 ### 3. Split an answer into tasks
 
@@ -162,7 +169,7 @@ Data stays **local**, in a single JSON file:
 $DSH_HOME/integrations/gor-tasks/tasks.json
 ```
 
-Writes use temp-file + atomic rename and are serialized, so concurrent writes cannot corrupt it. Shape:
+Writes use temp-file + atomic rename and are serialized; before writing it takes a `tasks.json.lock` lock and checks the file mtime, so several DSH windows no longer overwrite each other. A replacing import first backs up to `tasks.json.bak-<timestamp>` (the latest 5 are kept). Shape:
 
 ```json
 {
@@ -183,7 +190,7 @@ Exports carry `format: "dsh-gor-tasks/export"`; import recognises that shape, an
 dsh-gor-tasks/
 ├── package.json        # package info, dsh.bundle / dsh.client declarations
 ├── cordis.patch.yml    # insertion point: id + package name
-├── index.js            # Host: storage, RPC, 9 tools
+├── index.js            # Host: storage, RPC, 10 tools
 ├── client.js           # UI: sidebar icon, task panel, split dialog, settings
 ├── locale/             # zh.json / en.json
 ├── icon.svg            # plugin icon

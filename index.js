@@ -15,7 +15,7 @@
  */
 
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -45,6 +45,19 @@ function normalizeSettings(input) {
     dueReminder: raw.dueReminder !== false,
     dueSoonDays: Number.isFinite(days) ? Math.max(0, Math.min(30, Math.round(days))) : SETTINGS_DEFAULTS.dueSoonDays,
   };
+}
+
+/* 日期一律按本地时区：toISOString 是 UTC，凌晨会算成「昨天」 */
+const pad2 = (value) => String(value).padStart(2, '0');
+
+function localDate(date = new Date()) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+}
+
+function shiftDate(days) {
+  const base = new Date();
+  base.setDate(base.getDate() + Number(days || 0));
+  return localDate(base);
 }
 
 /* ------------------------------------------------------------------ store */
@@ -78,6 +91,7 @@ function normalizeTask(task) {
     status: STATUSES.includes(task.status) ? task.status : 'todo',
     priority: PRIORITIES.includes(task.priority) ? task.priority : 'normal',
     due: typeof task.due === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(task.due) ? task.due : null,
+    // tags 暂未在界面和工具里暴露（v2 标签功能预留），保留是为了导入导出不丢字段
     tags: Array.isArray(task.tags) ? task.tags.map((tag) => String(tag).slice(0, 40)).slice(0, 12) : [],
     order: Number.isFinite(task.order) ? task.order : Date.now(),
     createdAt: typeof task.createdAt === 'string' ? task.createdAt : now,
@@ -97,12 +111,54 @@ function normalizeProject(project, index) {
   };
 }
 
-function createStore() {
+/* ------------------------------------------------------------- write gate */
+
+const LOCK_RETRY_MS = 50;
+const LOCK_TIMEOUT_MS = 2000;
+const LOCK_STALE_MS = 15000;
+const BACKUP_KEEP = 5;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+function cloneStore(store) {
+  return JSON.parse(JSON.stringify(store));
+}
+
+function fileStamp(date = new Date()) {
+  const pad = (value) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-`
+    + `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
+/* done 状态维护 completedAt：首次完成记时间，离开 done 清空 */
+function stampCompletion(before, task) {
+  if (task.status === 'done' && !before?.completedAt) task.completedAt = new Date().toISOString();
+  if (task.status !== 'done') task.completedAt = null;
+  return task;
+}
+
+function createStore(warn = () => {}) {
   let cached = null;
+  let stamp = null; // 上次读/写时磁盘文件的 mtime + size，用来发现别的进程改过库
   let writing = Promise.resolve();
+  let lockUnavailable = false;
+
+  const lockPath = () => `${storePath()}.lock`;
+
+  async function readStamp() {
+    try {
+      const info = await stat(storePath());
+      return { mtimeMs: info.mtimeMs, size: info.size };
+    } catch {
+      return null;
+    }
+  }
 
   async function load() {
-    if (cached) return cached;
+    const disk = await readStamp();
+    const unchanged = Boolean(cached && stamp && disk && disk.mtimeMs === stamp.mtimeMs && disk.size === stamp.size);
+    // 内存里还是「空库」且磁盘也确实没有文件时，无需重读
+    if (cached && (unchanged || (!stamp && !disk))) return cached;
     try {
       const raw = await readFile(storePath(), 'utf8');
       const parsed = JSON.parse(raw);
@@ -122,8 +178,10 @@ function createStore() {
         tasks: Array.isArray(parsed.tasks) ? parsed.tasks.map(normalizeTask) : [],
         settings: normalizeSettings(parsed.settings),
       };
+      stamp = disk;
     } catch {
       cached = emptyStore();
+      stamp = null;
     }
     return cached;
   }
@@ -131,13 +189,102 @@ function createStore() {
   async function flush() {
     const snapshot = JSON.stringify(cached ?? emptyStore(), null, 2);
     const target = storePath();
-    writing = writing.then(async () => {
+    const tmp = `${target}.${process.pid}.${randomBytes(3).toString('hex')}.tmp`;
+    const job = writing.then(async () => {
+      try {
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(tmp, snapshot, 'utf8');
+        await rename(tmp, target);
+        stamp = await readStamp();
+      } catch (cause) {
+        await rm(tmp, { force: true }).catch(() => undefined);
+        throw Object.assign(new Error(`任务数据写入失败：${cause?.message ?? cause}`), { code: 'store-write-failed' });
+      }
+    });
+    writing = job.catch(() => undefined); // 链条不能被一次失败打断，错误交给本次调用者
+    await job;
+  }
+
+  /* 跨进程锁：多个 DSH 窗口同写一个 json 时，后写者会把先写者的改动整体覆盖 */
+  async function acquireLock() {
+    const target = lockPath();
+    try {
       await mkdir(dirname(target), { recursive: true });
-      const tmp = `${target}.${process.pid}.tmp`;
-      await writeFile(tmp, snapshot, 'utf8');
-      await rename(tmp, target);
-    }).catch(() => undefined);
-    return writing;
+    } catch (error) {
+      warn(`[dsh-gor-tasks] 数据目录不可写：${error?.message ?? error}`);
+    }
+    const deadline = Date.now() + LOCK_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      try {
+        const handle = await open(target, 'wx');
+        await handle.writeFile(`${process.pid} ${new Date().toISOString()}`, 'utf8').catch(() => undefined);
+        await handle.close().catch(() => undefined);
+        return async () => { await rm(target, { force: true }).catch(() => undefined); };
+      } catch (error) {
+        if (error?.code !== 'EEXIST') {
+          if (!lockUnavailable) {
+            lockUnavailable = true;
+            warn(`[dsh-gor-tasks] 数据锁不可用（${error?.code ?? error?.message}），降级为无锁写入`);
+          }
+          return async () => {};
+        }
+        try {
+          const info = await stat(target);
+          if (Date.now() - info.mtimeMs > LOCK_STALE_MS) {
+            await rm(target, { force: true }).catch(() => undefined);
+            continue;
+          }
+        } catch {
+          continue; // 锁刚好被释放，立刻重试
+        }
+        await sleep(LOCK_RETRY_MS);
+      }
+    }
+    throw Object.assign(new Error('任务数据正在被另一个窗口写入，请稍后重试'), { code: 'store-busy' });
+  }
+
+  /* 覆盖式导入前留一份快照，只保留最近 BACKUP_KEEP 份 */
+  async function backupStore() {
+    const target = storePath();
+    let raw;
+    try {
+      raw = await readFile(target, 'utf8');
+    } catch {
+      return null; // 首次导入，本来就没有文件
+    }
+    const file = `${target}.bak-${fileStamp()}`;
+    try {
+      await writeFile(file, raw, 'utf8');
+    } catch (error) {
+      warn(`[dsh-gor-tasks] 导入前备份失败：${error?.message ?? error}`);
+      return null;
+    }
+    try {
+      const dir = dirname(target);
+      const prefix = 'tasks.json.bak-';
+      const names = (await readdir(dir)).filter((name) => name.startsWith(prefix)).sort();
+      for (const name of names.slice(0, Math.max(0, names.length - BACKUP_KEEP))) {
+        await rm(join(dir, name), { force: true }).catch(() => undefined);
+      }
+    } catch { /* 清理失败不影响导入 */ }
+    return file;
+  }
+
+  /* 所有写操作走同一道闸门：取锁 → 重读最新库 → 改 → 落盘；失败回滚内存 */
+  async function mutate(change) {
+    const release = await acquireLock();
+    const snapshot = cached ? cloneStore(cached) : null;
+    try {
+      const store = await load();
+      const result = await change(store);
+      await flush();
+      return result;
+    } catch (error) {
+      if (snapshot) cached = snapshot;
+      throw error;
+    } finally {
+      await release();
+    }
   }
 
   return {
@@ -146,10 +293,10 @@ function createStore() {
       return { projects: store.projects.slice(), tasks: store.tasks.slice(), settings: { ...store.settings } };
     },
     async saveSettings(patch) {
-      const store = await load();
-      store.settings = normalizeSettings({ ...store.settings, ...(patch && typeof patch === 'object' ? patch : {}) });
-      await flush();
-      return { ...store.settings };
+      return mutate((store) => {
+        store.settings = normalizeSettings({ ...store.settings, ...(patch && typeof patch === 'object' ? patch : {}) });
+        return { ...store.settings };
+      });
     },
     async exportData() {
       const store = await load();
@@ -176,92 +323,143 @@ function createStore() {
       const tasks = (Array.isArray(data.tasks) ? data.tasks : [])
         .map(normalizeTask)
         .map((task) => (known.has(task.projectId) ? task : { ...task, projectId: INBOX }));
-      cached = {
-        version: STORE_VERSION,
-        projects: projects.sort((a, b) => a.order - b.order),
-        tasks,
-        settings: normalizeSettings(data.settings),
-      };
-      await flush();
-      return { projects: cached.projects.length, tasks: cached.tasks.length, settings: { ...cached.settings } };
+      return mutate(async (store) => {
+        await backupStore();
+        store.projects = projects.sort((a, b) => a.order - b.order);
+        store.tasks = tasks;
+        store.settings = normalizeSettings(data.settings);
+        return { projects: store.projects.length, tasks: store.tasks.length, settings: { ...store.settings } };
+      });
     },
     async saveProject(input) {
-      const store = await load();
-      const index = store.projects.findIndex((project) => project.id === input.id);
-      if (index >= 0) {
-        const name = String(input.name ?? store.projects[index].name ?? '').trim();
-        if (!name) throw Object.assign(new Error('项目名称不能为空'), { code: 'bad-name' });
-        store.projects[index] = normalizeProject({ ...store.projects[index], ...input, name }, index);
-      } else {
+      return mutate((store) => {
+        const index = store.projects.findIndex((project) => project.id === input.id);
+        if (index >= 0) {
+          const name = String(input.name ?? store.projects[index].name ?? '').trim();
+          if (!name) throw Object.assign(new Error('项目名称不能为空'), { code: 'bad-name' });
+          store.projects[index] = normalizeProject({ ...store.projects[index], ...input, name }, index);
+          return { ...store.projects[index] };
+        }
         const name = String(input.name ?? '').trim();
         if (!name) throw Object.assign(new Error('项目名称不能为空'), { code: 'bad-name' });
         store.projects.push(normalizeProject({ ...input, name, id: input.id ?? newId('p') }, store.projects.length));
-      }
-      await flush();
-      return index >= 0 ? store.projects[index] : store.projects.at(-1);
+        return { ...store.projects.at(-1) };
+      });
     },
     async reorderProjects(ids) {
-      const store = await load();
-      const wanted = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [];
-      const known = new Set(store.projects.map((project) => project.id));
-      const ordered = wanted.filter((id, index) => known.has(id) && wanted.indexOf(id) === index);
-      for (const project of store.projects) {
-        if (!ordered.includes(project.id)) ordered.push(project.id);
-      }
-      ordered.forEach((id, index) => {
-        const project = store.projects.find((item) => item.id === id);
-        if (project) project.order = index;
+      return mutate((store) => {
+        const wanted = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [];
+        const known = new Set(store.projects.map((project) => project.id));
+        const ordered = wanted.filter((id, index) => known.has(id) && wanted.indexOf(id) === index);
+        for (const project of store.projects) {
+          if (!ordered.includes(project.id)) ordered.push(project.id);
+        }
+        ordered.forEach((id, index) => {
+          const project = store.projects.find((item) => item.id === id);
+          if (project) project.order = index;
+        });
+        store.projects.sort((a, b) => a.order - b.order);
+        return store.projects.map((project) => ({ id: project.id, name: project.name, order: project.order }));
       });
-      store.projects.sort((a, b) => a.order - b.order);
-      await flush();
-      return store.projects.map((project) => ({ id: project.id, name: project.name, order: project.order }));
     },
     async deleteProject(id) {
       if (id === INBOX) throw Object.assign(new Error('收集箱不能删除'), { code: 'inbox-protected' });
-      const store = await load();
-      const before = store.projects.length;
-      store.projects = store.projects.filter((project) => project.id !== id);
-      if (store.projects.length === before) throw Object.assign(new Error('项目不存在'), { code: 'project-not-found' });
-      const removed = store.tasks.filter((task) => task.projectId === id).length;
-      store.tasks = store.tasks.filter((task) => task.projectId !== id);
-      await flush();
-      return { id, deletedTasks: removed };
+      return mutate((store) => {
+        const project = store.projects.find((item) => item.id === id);
+        if (!project) throw Object.assign(new Error('项目不存在'), { code: 'project-not-found' });
+        const removed = store.tasks.filter((task) => task.projectId === id).map((task) => ({ ...task }));
+        store.projects = store.projects.filter((item) => item.id !== id);
+        store.tasks = store.tasks.filter((task) => task.projectId !== id);
+        // 快照带回去，客户端可以「撤销」整包恢复
+        return { id, deletedTasks: removed.length, project: { ...project }, tasks: removed };
+      });
     },
     async saveTask(input) {
-      const store = await load();
-      const index = store.tasks.findIndex((task) => task.id === input.id);
-      if (index >= 0) {
-        const merged = normalizeTask({ ...store.tasks[index], ...input });
-        if (merged.status === 'done' && !store.tasks[index].completedAt) merged.completedAt = new Date().toISOString();
-        if (merged.status !== 'done') merged.completedAt = null;
-        store.tasks[index] = merged;
-        await flush();
-        return merged;
-      }
-      const created = normalizeTask({ ...input, id: input.id ?? newId('t') });
-      if (created.status === 'done') created.completedAt = new Date().toISOString();
-      store.tasks.push(created);
-      await flush();
-      return created;
+      return mutate((store) => {
+        const index = store.tasks.findIndex((task) => task.id === input.id);
+        if (index >= 0) {
+          const before = store.tasks[index];
+          store.tasks[index] = stampCompletion(before, normalizeTask({ ...before, ...input }));
+          return { ...store.tasks[index] };
+        }
+        const created = stampCompletion(null, normalizeTask({ ...input, id: input.id ?? newId('t') }));
+        store.tasks.push(created);
+        return { ...created };
+      });
     },
     async bulkAdd({ projectId, tasks }) {
-      const store = await load();
-      const created = [];
-      for (const item of tasks.slice(0, 200)) {
-        if (!String(item?.title ?? '').trim()) continue;
-        const task = normalizeTask({ ...item, projectId: item.projectId ?? projectId ?? INBOX });
-        store.tasks.push(task);
-        created.push(task);
-      }
-      if (created.length) await flush();
-      return created;
+      const items = (Array.isArray(tasks) ? tasks : [])
+        .slice(0, 200)
+        .filter((item) => String(item?.title ?? '').trim());
+      if (!items.length) return [];
+      return mutate((store) => {
+        const created = [];
+        for (const item of items) {
+          const task = stampCompletion(null, normalizeTask({ ...item, projectId: item.projectId ?? projectId ?? INBOX }));
+          store.tasks.push(task);
+          created.push({ ...task });
+        }
+        return created;
+      });
+    },
+    async bulkUpdate({ ids, patch }) {
+      const wanted = new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string'));
+      const safe = patch && typeof patch === 'object' ? patch : {};
+      if (!wanted.size) return [];
+      return mutate((store) => {
+        const updated = [];
+        for (let index = 0; index < store.tasks.length; index += 1) {
+          const before = store.tasks[index];
+          if (!wanted.has(before.id)) continue;
+          const next = { ...before };
+          if (STATUSES.includes(safe.status)) next.status = safe.status;
+          if (PRIORITIES.includes(safe.priority)) next.priority = safe.priority;
+          if (typeof safe.projectId === 'string' && safe.projectId) next.projectId = safe.projectId;
+          if (safe.due !== undefined) next.due = String(safe.due ?? '').trim() || null;
+          store.tasks[index] = stampCompletion(before, normalizeTask(next));
+          updated.push({ ...store.tasks[index] });
+        }
+        return updated;
+      });
+    },
+    async bulkRemove(ids) {
+      const wanted = new Set((Array.isArray(ids) ? ids : []).filter((id) => typeof id === 'string'));
+      if (!wanted.size) return [];
+      return mutate((store) => {
+        const removed = store.tasks.filter((task) => wanted.has(task.id)).map((task) => ({ ...task }));
+        if (!removed.length) return [];
+        store.tasks = store.tasks.filter((task) => !wanted.has(task.id));
+        return removed;
+      });
+    },
+    /* 只重排传入的这一批（客户端传当前可见列表），其余任务 order 整体后移，保持相对次序 */
+    async reorderTasks(ids) {
+      const wanted = Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [];
+      const moving = wanted.filter((id, index) => wanted.indexOf(id) === index);
+      if (!moving.length) return [];
+      return mutate((store) => {
+        const set = new Set(moving);
+        const known = new Set(store.tasks.map((task) => task.id));
+        const ordered = moving.filter((id) => known.has(id));
+        if (!ordered.length) return [];
+        for (const task of store.tasks) {
+          if (!set.has(task.id)) task.order = (Number.isFinite(task.order) ? task.order : 0) + ordered.length;
+        }
+        ordered.forEach((id, index) => {
+          const task = store.tasks.find((item) => item.id === id);
+          if (task) task.order = index;
+        });
+        return ordered.map((id) => ({ id, order: store.tasks.find((item) => item.id === id)?.order ?? 0 }));
+      });
     },
     async deleteTask(id) {
-      const store = await load();
-      const before = store.tasks.length;
-      store.tasks = store.tasks.filter((task) => task.id !== id);
-      if (store.tasks.length !== before) await flush();
-      return store.tasks.length !== before;
+      return mutate((store) => {
+        const task = store.tasks.find((item) => item.id === id);
+        if (!task) return { ok: false, task: null };
+        store.tasks = store.tasks.filter((item) => item.id !== id);
+        // 带快照回去，客户端可以「撤销」
+        return { ok: true, task: { ...task } };
+      });
     },
   };
 }
@@ -463,6 +661,18 @@ function createHandler(store, ctx) {
             tasks: Array.isArray(payload.tasks) ? payload.tasks : [],
           }),
         };
+      case 'task.bulkUpdate':
+        return {
+          ok: true,
+          value: await store.bulkUpdate({
+            ids: Array.isArray(payload.ids) ? payload.ids : [],
+            patch: isRecord(payload.patch) ? payload.patch : payload,
+          }),
+        };
+      case 'task.bulkDelete':
+        return { ok: true, value: await store.bulkRemove(payload.ids) };
+      case 'task.reorder':
+        return { ok: true, value: await store.reorderTasks(payload.ids) };
       default:
         return { ok: false, error: { code: 'unknown-endpoint', message: `Unknown endpoint: ${method}` } };
     }
@@ -518,19 +728,29 @@ function buildTools(store) {
 
   list.push({
     name: 'task_list',
-    description: '列出待办任务。可按项目名/ID、状态过滤，用于查看用户当前的任务清单。',
+    description: '列出待办任务。可按项目、状态、优先级、到期时间过滤并统计，用于回答「今天/这周要做什么」。',
     parameters: objectSchema({
       project: TEXT('项目名称或 ID，省略表示全部项目'),
       status: ENUM([...STATUSES, 'open', 'all'], '状态过滤，默认 open（未完成）'),
+      priority: ENUM(PRIORITIES, '优先级过滤'),
+      due: TEXT('到期过滤：today / week（未来 7 天）/ overdue（已逾期）/ YYYY-MM-DD / YYYY-MM-DD..YYYY-MM-DD'),
+      sort: ENUM(['due', 'priority', 'created', 'manual'], '排序方式，默认 due（到期升序）'),
       limit: { type: 'number', description: '最多返回条数，默认 50' },
     }),
     output: {
-      schema: objectSchema({ count: { type: 'number' }, text: { type: 'string' } }, ['count', 'text']),
+      schema: objectSchema({
+        count: { type: 'number' },
+        overdue: { type: 'number' },
+        dueToday: { type: 'number' },
+        doneThisWeek: { type: 'number' },
+        text: { type: 'string' },
+      }, ['count', 'text']),
       render: (_args, value) => textResult(value.text),
     },
     isConcurrencySafe: true,
     async execute(args) {
       const { projects, tasks } = await store.state();
+      const now = localDate();
       const wanted = String(args.status ?? 'open');
       let items = tasks.slice();
       if (args.project) {
@@ -542,12 +762,49 @@ function buildTools(store) {
           ? items.filter((task) => task.status !== 'done')
           : items.filter((task) => task.status === wanted);
       }
-      items.sort((a, b) => (a.due ?? '9999').localeCompare(b.due ?? '9999') || a.order - b.order);
+      if (args.priority && PRIORITIES.includes(args.priority)) {
+        items = items.filter((task) => task.priority === args.priority);
+      }
+      const due = String(args.due ?? '').trim();
+      if (due) {
+        if (due === 'today') items = items.filter((task) => task.due === now);
+        else if (due === 'overdue') items = items.filter((task) => task.due && task.due < now);
+        else if (due === 'week') {
+          const until = shiftDate(7);
+          items = items.filter((task) => task.due && task.due >= now && task.due <= until);
+        } else if (due.includes('..')) {
+          const [from, to] = due.split('..').map((value) => value.trim());
+          items = items.filter((task) => task.due && (!from || task.due >= from) && (!to || task.due <= to));
+        } else if (/^\d{4}-\d{2}-\d{2}$/.test(due)) {
+          items = items.filter((task) => task.due === due);
+        }
+      }
+      const rank = { urgent: 0, high: 1, normal: 2, low: 3 };
+      const sortKey = String(args.sort ?? 'due');
+      items.sort((a, b) => {
+        if (sortKey === 'priority') {
+          const delta = (rank[a.priority] ?? 2) - (rank[b.priority] ?? 2);
+          if (delta !== 0) return delta;
+        } else if (sortKey === 'created') {
+          const delta = String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''));
+          if (delta !== 0) return delta;
+        } else if (sortKey === 'manual') {
+          return a.order - b.order;
+        }
+        return (a.due ?? '9999-99-99').localeCompare(b.due ?? '9999-99-99') || a.order - b.order;
+      });
       const limit = Math.max(1, Math.min(200, Number(args.limit) || 50));
       const shown = items.slice(0, limit);
-      const header = `共 ${items.length} 条任务${shown.length < items.length ? `（显示前 ${shown.length} 条）` : ''}：`;
+      const open = items.filter((task) => task.status !== 'done');
+      const overdue = open.filter((task) => task.due && task.due < now).length;
+      const dueToday = open.filter((task) => task.due === now).length;
+      const doneThisWeek = tasks
+        .filter((task) => task.status === 'done' && String(task.completedAt ?? '').slice(0, 10) >= shiftDate(-6))
+        .length;
+      const summary = `逾期 ${overdue}、今天到期 ${dueToday}、近 7 天完成 ${doneThisWeek}`;
+      const header = `共 ${items.length} 条任务（${summary}）${shown.length < items.length ? `，显示前 ${shown.length} 条` : ''}：`;
       const text = [header, ...shown.map((task) => describeTask(task, projects))].join('\n');
-      return { count: items.length, text };
+      return { count: items.length, overdue, dueToday, doneThisWeek, text };
     },
   });
 
@@ -639,6 +896,43 @@ function buildTools(store) {
       if (!task) throw new Error('找不到匹配的任务。');
       await store.deleteTask(task.id);
       return { ok: true, text: `已删除任务：${task.title}` };
+    },
+  });
+
+  list.push({
+    name: 'task_bulk_update',
+    description: '批量修改多条任务的状态/优先级/项目/截止日期。先用 task_list 拿到 id，比逐条 task_update 更稳。',
+    parameters: objectSchema({
+      ids: { type: 'array', items: { type: 'string' }, description: '任务 ID 数组（先用 task_list 获取）' },
+      status: ENUM(STATUSES, '新状态'),
+      priority: ENUM(PRIORITIES, '新优先级'),
+      project: TEXT('移动到该项目（名称或 ID）'),
+      due: TEXT('YYYY-MM-DD，空字符串表示清除'),
+    }, ['ids']),
+    output: {
+      schema: objectSchema({ count: { type: 'number' }, text: { type: 'string' } }, ['count', 'text']),
+      render: (_args, value) => textResult(value.text),
+    },
+    async execute(args) {
+      const ids = Array.isArray(args.ids) ? args.ids.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()) : [];
+      if (!ids.length) throw new Error('ids 为空，请先用 task_list 取任务 id。');
+      const patch = {};
+      if (args.status) patch.status = args.status;
+      if (args.priority) patch.priority = args.priority;
+      if (args.due !== undefined) patch.due = args.due;
+      if (args.project) {
+        const { projects } = await store.state();
+        const project = resolveProject(projects, args.project);
+        if (!project) throw new Error(`找不到项目「${args.project}」。`);
+        patch.projectId = project.id;
+      }
+      if (!Object.keys(patch).length) throw new Error('没有要修改的字段（status / priority / project / due 至少给一个）。');
+      const updated = await store.bulkUpdate({ ids, patch });
+      if (!updated.length) return { count: 0, text: '没有匹配到任务，请检查 id。' };
+      return {
+        count: updated.length,
+        text: `已更新 ${updated.length} 条任务：\n${updated.map((task) => `- [${task.status}] ${task.title} id=${task.id}`).join('\n')}`,
+      };
     },
   });
 
@@ -779,8 +1073,9 @@ function buildTools(store) {
 export const name = PLUGIN_NAME;
 
 export function apply(ctx) {
-  const store = createStore();
   const logger = typeof ctx?.logger === 'function' ? ctx.logger(PLUGIN_NAME) : (ctx?.logger ?? console);
+  const warn = (message) => logger?.warn?.(message);
+  const store = createStore(warn);
 
   const install = (scope) => {
     try {

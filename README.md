@@ -5,7 +5,7 @@
 **把「待办」放进 DeepSeek Harness：左侧入口、项目分类、对话里增删、回答一键拆成任务。**
 
 <img src="https://img.shields.io/badge/for-DeepSeek%20Harness-4176E6?style=flat" alt="DeepSeek Harness">
-<img src="https://img.shields.io/badge/version-1.2.0-2f6bff?style=flat" alt="1.2.0">
+<img src="https://img.shields.io/badge/version-1.3.0-2f6bff?style=flat" alt="1.3.0">
 <img src="https://img.shields.io/badge/license-MIT-3c9d6c?style=flat" alt="MIT">
 
 **中文** · [English](README.en.md)
@@ -59,8 +59,12 @@ DSH 里聊得很热闹，真正要动手的事却散在对话里。这个插件�
 | 拖拽排序 | 项目顺序即显示顺序，收集箱也可以拖 |
 | 任务字段 | 标题、说明、状态（待办/进行中/受阻/已完成）、优先级、截止日期 |
 | 过滤检索 | 全部任务 / 单项目、进行中 / 全部 / 已完成、关键字搜索 |
+| 智能列表 | 今天到期 / 未来 7 天 / 已逾期 / 高优先级 / 无截止日期，侧栏直达，各自带未完成数 |
+| 批量操作 | 勾选任务（Shift 连选、全选）后批量改状态、换项目、删除 |
+| 撤销删除 | 删任务、删项目、批量删之后 8 秒内可撤销，任务顺序一起恢复 |
+| 自定义排序 | 列表视图切到「自定义」后可拖拽任务行调整顺序，选择会记住 |
 | 两种视图 | 列表视图按状态分页签；看板视图四列分别对应待办 / 进行中 / 受阻 / 已完成，卡片可拖拽换状态，选择会记住 |
-| 对话里管理 | 9 个工具：建项目、列项目、建任务、批量建、改任务、删任务、列任务、删项目、改项目 |
+| 对话里管理 | 10 个工具：建项目、列项目、建任务、批量建、批量改、改任务、删任务、列任务、删项目、改项目 |
 | 回答拆成任务 | 消息操作条上「拆成任务」，用你配置的模型拆分，也支持不调模型的按行粗拆 |
 | 系统设置 | 模型拆分开关、到期提醒开关与提前天数、数据导入导出 |
 | 明暗主题 | 配色全部取自 DSH 主题变量，跟随 DSH 的浅色/深色设置（含跟随系统）自动切换 |
@@ -104,10 +108,12 @@ profile 的 `package.json`（路径换成你 clone 的位置）：
 
 ### 1. 界面
 
-侧栏点「待办任务」进入三栏：左边是项目，中间是任务，点任务从右侧滑出编辑抽屉。
-
+- 侧栏点「待办任务」进入三栏：左边是项目，中间是任务，点任务从右侧滑出编辑抽屉。
+- 左栏除了「全部任务」和项目，还有「智能列表」：今天到期、未来 7 天、已逾期、高优先级、无截止日期；
 - 「+ 新建任务」：标题必填，可选项目、状态、优先级、截止日期；
 - 项目行 hover 出现 `✎`（改名）、`✕`（删除）、`⋮⋮`（拖动）；
+- 任务行左侧的小方框用来多选（Shift 连选），选中后顶栏变成批量操作条；
+- 列表视图右上角可切「默认 / 自定义」排序，自定义模式下直接拖任务行调顺序；
 - 顶栏右侧齿轮是**系统设置**。
 
 ### 2. 在对话里管理
@@ -127,6 +133,7 @@ profile 的 `package.json`（路径换成你 clone 的位置）：
 | `project_list` / `project_create` / `project_update` / `project_delete` | 项目的查、建、改、删 |
 | `task_list` / `task_create` / `task_update` / `task_delete` | 任务的查、建、改、删 |
 | `task_bulk_add` | 一次加多条（拆分的落库就走它） |
+| `task_bulk_update` | 一次改多条任务的状态 / 优先级 / 项目 / 截止 |
 
 ### 3. 把回答拆成任务
 
@@ -162,7 +169,7 @@ profile 的 `package.json`（路径换成你 clone 的位置）：
 $DSH_HOME/integrations/gor-tasks/tasks.json
 ```
 
-写入是「临时文件 + 原子重命名」，并且串行化，避免并发写坏。格式：
+写入是「临时文件 + 原子重命名」，并且串行化；写盘前还会取 `tasks.json.lock` 锁并校验文件 mtime，多开 DSH 窗口不会互相覆盖。覆盖式导入会先备份成 `tasks.json.bak-时间戳`（保留最近 5 份）。格式：
 
 ```json
 {
@@ -183,7 +190,7 @@ $DSH_HOME/integrations/gor-tasks/tasks.json
 dsh-gor-tasks/
 ├── package.json        # 包信息、dsh.bundle / dsh.client 声明
 ├── cordis.patch.yml    # 插入点：id + 包名
-├── index.js            # Host：存储、RPC、9 个工具
+├── index.js            # Host：存储、RPC、10 个工具
 ├── client.js           # 界面：侧栏图标、任务面板、拆分弹窗、设置
 ├── locale/             # zh.json / en.json
 ├── icon.svg            # 插件图标

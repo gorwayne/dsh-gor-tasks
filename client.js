@@ -15,6 +15,14 @@ window.__ModuleLoader__.load({
     const STATUS_LABEL = { todo: '待办', doing: '进行中', blocked: '受阻', done: '已完成' };
     const BOARD_COLUMNS = ['todo', 'doing', 'blocked', 'done'];
     const VIEW_KEY = 'gor-tasks.view';
+    const SORT_KEY = 'gor-tasks.sort';
+    const SMART_LISTS = [
+      { key: 'today', label: '今天到期' },
+      { key: 'week', label: '未来 7 天' },
+      { key: 'overdue', label: '已逾期' },
+      { key: 'high', label: '高优先级' },
+      { key: 'nodue', label: '无截止日期' },
+    ];
     const PRIORITY_LABEL = { low: '低', normal: '普通', high: '高', urgent: '紧急' };
     const PRIORITY_COLOR = { low: '#8b8fa3', normal: '#5b8def', high: '#e8933a', urgent: '#e5564b' };
 
@@ -71,6 +79,16 @@ window.__ModuleLoader__.load({
 .zs-notes-flag{color:var(--dsw-alias-label-tertiary,#8b8fa3);cursor:help}
 .zs-pdot{width:6px;height:6px;border-radius:50%}
 .zs-empty{padding:56px 16px;text-align:center;color:var(--dsw-alias-label-tertiary,#8b8fa3)}
+.zs-pick{width:14px;height:14px;margin-top:3px;flex:0 0 14px;border-radius:4px;border:1.5px solid var(--dsw-alias-border-l3,#b9bdcb);display:flex;align-items:center;justify-content:center;font-size:10px;line-height:1;cursor:pointer;color:var(--dsw-alias-label-primary-foreground,#fff);opacity:0}
+.zs-task:hover .zs-pick,.zs-card:hover .zs-pick,.zs-pick.on,.zs-pick.show{opacity:1}
+.zs-pick.on{background:var(--dsw-alias-brand-primary,#2f6bff);border-color:var(--dsw-alias-brand-primary,#2f6bff)}
+.zs-task.picked{background:var(--dsw-alias-interactive-bg-active,#e8eaf1);border-color:var(--dsw-alias-border-l2,#e0e2ea)}
+.zs-task.drag{opacity:.45}
+.zs-task.drop-before{box-shadow:inset 0 2px 0 var(--dsw-alias-brand-primary,#2f6bff)}
+.zs-task.drop-after{box-shadow:inset 0 -2px 0 var(--dsw-alias-brand-primary,#2f6bff)}
+.zs-card.picked{border-color:var(--dsw-alias-brand-primary,#2f6bff)}
+.zs-bulk{display:flex;align-items:center;gap:8px;row-gap:8px;flex-wrap:wrap;padding:8px 16px;border-bottom:1px solid var(--dsw-alias-border-l2,#e8e9ee);background:var(--dsw-alias-interactive-bg-hover,#f6f7fa);font-size:12px}
+.zs-bulk-count{font-weight:600;margin-right:2px}
 .zs-drawer{color:var(--dsw-alias-label-primary,#1d1e22);width:330px;flex:0 0 330px;box-sizing:border-box;border-left:1px solid var(--dsw-alias-border-l2,#e8e9ee);padding:14px;gap:10px;overflow:auto;background:var(--dsw-alias-bg-layer-1,#fff)}
 .zs-field{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
 .zs-field label{font-size:11px;color:var(--dsw-alias-label-tertiary,#8b8fa3)}
@@ -85,7 +103,9 @@ window.__ModuleLoader__.load({
 .zs-split-btn{order:1;display:inline-flex;align-items:center;gap:5px;height:26px;box-sizing:border-box;border:0;background:transparent;color:var(--dsw-alias-label-tertiary,#8b8fa3);border-radius:7px;padding:0 8px;font-size:13px;line-height:1;cursor:pointer;white-space:nowrap}
 .zs-split-btn svg{width:15px;height:15px;flex:0 0 15px}
 .zs-split-btn:hover{color:var(--dsw-alias-brand-primary,#2f6bff);background:rgba(127,127,127,.12)}
-.zs-toast{position:fixed;left:50%;bottom:42px;transform:translateX(-50%);background:var(--dsw-alias-toast-bg,#22252d);color:var(--dsw-alias-toast-label,#fff);padding:8px 14px;border-radius:9px;font-size:12px;z-index:80;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.zs-toast{position:fixed;left:50%;bottom:42px;transform:translateX(-50%);display:flex;align-items:center;gap:10px;max-width:min(520px,92vw);background:var(--dsw-alias-toast-bg,#22252d);color:var(--dsw-alias-toast-label,#fff);padding:8px 14px;border-radius:9px;font-size:12px;z-index:80;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.zs-toast-btn{border:0;background:transparent;color:var(--dsw-alias-brand-primary,#7aa2ff);font-size:12px;font-weight:600;cursor:pointer;padding:0;white-space:nowrap}
+.zs-toast-btn:hover{text-decoration:underline}
 @container (max-width: 980px){
 .zs-side{width:176px;flex:0 1 176px;min-width:130px}
 .zs-bar{padding:10px 12px}
@@ -161,7 +181,18 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
     /* ------------------------------------------------------------- format */
 
     const h = React.createElement;
-    const today = () => new Date().toISOString().slice(0, 10);
+
+    /* 日期一律按本地时区算：toISOString 是 UTC，东八区凌晨会算成「昨天」 */
+    const pad2 = (value) => String(value).padStart(2, '0');
+    function localDate(date = new Date()) {
+      return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`;
+    }
+    const today = () => localDate();
+    function addDaysLocal(days) {
+      const base = new Date();
+      base.setDate(base.getDate() + Number(days || 0));
+      return localDate(base);
+    }
 
     function dueInfo(due) {
       if (!due) return null;
@@ -174,20 +205,39 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
     /* 快到期（含已逾期）且未完成的任务数，用于侧栏红圈 */
     function countDueSoon(tasks, days) {
       const span = Number.isFinite(Number(days)) ? Math.max(0, Math.round(Number(days))) : 3;
-      const base = new Date(`${today()}T00:00:00`);
-      base.setDate(base.getDate() + span);
-      const limit = base.toISOString().slice(0, 10);
+      const limit = addDaysLocal(span);
       return (Array.isArray(tasks) ? tasks : [])
         .filter((task) => task.status !== 'done' && task.due && task.due <= limit)
         .length;
     }
 
-    function toast(message) {      if (typeof document === 'undefined') return;
+    function matchSmart(task, key) {
+      const now = today();
+      if (key === 'today') return Boolean(task.due) && task.due === now;
+      if (key === 'week') return Boolean(task.due) && task.due >= now && task.due <= addDaysLocal(7);
+      if (key === 'overdue') return Boolean(task.due) && task.due < now;
+      if (key === 'high') return task.priority === 'high' || task.priority === 'urgent';
+      if (key === 'nodue') return !task.due;
+      return true;
+    }
+
+    function toast(message, options) {      if (typeof document === 'undefined') return;
+      const { actionText, onAction, timeout = 2200 } = options ?? {};
       const element = document.createElement('div');
       element.className = 'zs-toast';
-      element.textContent = message;
+      const label = document.createElement('span');
+      label.textContent = message;
+      element.appendChild(label);
+      if (actionText && typeof onAction === 'function') {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'zs-toast-btn';
+        button.textContent = actionText;
+        button.onclick = () => { element.remove(); onAction(); };
+        element.appendChild(button);
+      }
       document.body.appendChild(element);
-      setTimeout(() => element.remove(), 2200);
+      setTimeout(() => element.remove(), Math.max(1500, timeout));
     }
 
     function splitLines(text) {
@@ -208,6 +258,24 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
       return out;
     }
 
+    const draftOf = (title) => ({ title, notes: '', priority: 'normal' });
+
+    /* textarea 只编辑标题行；行号或标题匹配上时，把模型给的说明/优先级留在原行上 */
+    function remapDrafts(prev, value) {
+      const byTitle = new Map();
+      for (const draft of prev) {
+        const key = draft.title.trim();
+        if (key && !byTitle.has(key)) byTitle.set(key, draft);
+      }
+      return value.split('\n').map((raw, index) => {
+        const key = raw.trim();
+        const same = prev[index];
+        if (key && same && same.title.trim() === key) return { ...same, title: raw };
+        const matched = key ? byTitle.get(key) : null;
+        return { ...(matched ?? { notes: '', priority: 'normal' }), title: raw };
+      });
+    }
+
     /* ---------------------------------------------------------------- rpc */
 
     function createClient(connection) {
@@ -225,7 +293,7 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
     /* -------------------------------------------------------------- store */
 
     function useStore(rpc) {
-      const [state, setState] = React.useState({ projects: [], tasks: [], settings: null, loading: true, error: null });
+      const [state, setState] = React.useState({ projects: [], tasks: [], settings: null, model: '', loading: true, error: null });
       const refresh = React.useCallback(async () => {
         try {
           const value = await rpc('state.get');
@@ -233,6 +301,7 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
             projects: value.projects ?? [],
             tasks: value.tasks ?? [],
             settings: value.settings ?? null,
+            model: value.model ?? '',
             loading: false,
             error: null,
           });
@@ -325,8 +394,25 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
           : null);
     }
 
-    function TaskRow({ task, project, onToggle, onOpen }) {
-      return h('div', { className: 'zs-task' },
+    function TaskRow({
+      task, project, onToggle, onOpen, picked, onPick, selecting,
+      reorderable, dragging, dropBefore, dropAfter, onDragStart, onDragOver, onDrop, onDragEnd,
+    }) {
+      return h('div', {
+        className: `zs-task${picked ? ' picked' : ''}${dragging ? ' drag' : ''}${dropBefore ? ' drop-before' : ''}${dropAfter ? ' drop-after' : ''}`,
+        draggable: Boolean(reorderable),
+        onDragStart: reorderable ? onDragStart : undefined,
+        onDragOver: reorderable ? onDragOver : undefined,
+        onDrop: reorderable ? onDrop : undefined,
+        onDragEnd: reorderable ? onDragEnd : undefined,
+      },
+        h('div', {
+          className: `zs-pick${picked ? ' on' : ''}${selecting ? ' show' : ''}`,
+          role: 'checkbox',
+          'aria-checked': picked,
+          title: '选择任务（Shift 连选）',
+          onClick: (event) => { event.stopPropagation(); onPick(task, event); },
+        }, picked ? '✓' : ''),
         h('div', {
           className: `zs-check${task.status === 'done' ? ' on' : ''}`,
           role: 'checkbox',
@@ -338,15 +424,23 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
           h(TaskMeta, { task, project })));
     }
 
-    function TaskCard({ task, project, dragging, onDragStart, onDragEnd, onOpen }) {
+    function TaskCard({ task, project, dragging, onDragStart, onDragEnd, onOpen, picked, onPick, selecting }) {
       return h('div', {
-        className: `zs-card${dragging ? ' dragging' : ''}`,
+        className: `zs-card${dragging ? ' dragging' : ''}${picked ? ' picked' : ''}`,
         draggable: true,
         onDragStart,
         onDragEnd,
         onClick: () => onOpen(task),
       },
-        h('div', { className: `zs-tt${task.status === 'done' ? ' done' : ''}` }, task.title || '(无标题)'),
+        h('div', { style: { display: 'flex', alignItems: 'flex-start', gap: 6 } },
+          h('div', {
+            className: `zs-pick${picked ? ' on' : ''}${selecting ? ' show' : ''}`,
+            role: 'checkbox',
+            'aria-checked': picked,
+            title: '选择任务（Shift 连选）',
+            onClick: (event) => { event.stopPropagation(); onPick(task, event); },
+          }, picked ? '✓' : ''),
+          h('div', { className: `zs-tt${task.status === 'done' ? ' done' : ''}`, style: { flex: 1 } }, task.title || '(无标题)')),
         h(TaskMeta, { task, project }));
     }
 
@@ -608,7 +702,7 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
     function TasksPage({ connection, t: translate }) {
       ensureStyle();
       const rpc = React.useMemo(() => createClient(connection), [connection]);
-      const { projects, tasks, settings, loading, error, refresh } = useStore(rpc);
+      const { projects, tasks, settings, model, loading, error, refresh } = useStore(rpc);
       const [settingsOpen, setSettingsOpen] = React.useState(false);
       const [projectId, setProjectId] = React.useState('all');
       const [filter, setFilter] = React.useState('open');
@@ -624,6 +718,18 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
       };
       const [editing, setEditing] = React.useState(null);
       const [saving, setSaving] = React.useState(false);
+      const [selected, setSelected] = React.useState(() => new Set());
+      const lastPickRef = React.useRef('');
+      const [smart, setSmart] = React.useState('');
+      const [sortMode, setSortMode] = React.useState(() => {
+        try { return localStorage.getItem(SORT_KEY) === 'custom' ? 'custom' : 'default'; } catch { return 'default'; }
+      });
+      const [rowDrag, setRowDrag] = React.useState('');
+      const [rowDrop, setRowDrop] = React.useState(null);
+      const setSort = (next) => {
+        setSortMode(next);
+        try { localStorage.setItem(SORT_KEY, next); } catch { /* 忽略隐私模式下的写入失败 */ }
+      };
       const [creatingProject, setCreatingProject] = React.useState(false);
       const [projectDialog, setProjectDialog] = React.useState(null); // { project } | null
       const [projectToDelete, setProjectToDelete] = React.useState(null);
@@ -637,12 +743,14 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
       const visible = React.useMemo(() => {
         let list = tasks.slice();
         if (projectId !== 'all') list = list.filter((task) => task.projectId === projectId);
-        if (filter === 'open') list = list.filter((task) => task.status !== 'done');
+        if (smart) list = list.filter((task) => task.status !== 'done' && matchSmart(task, smart));
+        else if (filter === 'open') list = list.filter((task) => task.status !== 'done');
         else if (filter === 'done') list = list.filter((task) => task.status === 'done');
         if (query.trim()) {
           const needle = query.trim().toLowerCase();
           list = list.filter((task) => `${task.title} ${task.notes}`.toLowerCase().includes(needle));
         }
+        if (sortMode === 'custom') return list.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
         return list.sort((a, b) => {
           if ((a.status === 'done') !== (b.status === 'done')) return a.status === 'done' ? 1 : -1;
           const order = { urgent: 0, high: 1, normal: 2, low: 3 };
@@ -650,12 +758,13 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
           if (byPriority !== 0) return byPriority;
           return (a.due ?? '9999-99-99').localeCompare(b.due ?? '9999-99-99') || a.order - b.order;
         });
-      }, [tasks, projectId, filter, query]);
+      }, [tasks, projectId, filter, query, smart, sortMode]);
 
-      // 看板不按状态过滤（列本身就是状态），项目与搜索照旧生效
+      // 看板不按状态过滤（列本身就是状态），项目、智能列表与搜索照旧生效
       const boardTasks = React.useMemo(() => {
         let list = tasks.slice();
         if (projectId !== 'all') list = list.filter((task) => task.projectId === projectId);
+        if (smart) list = list.filter((task) => task.status !== 'done' && matchSmart(task, smart));
         if (query.trim()) {
           const needle = query.trim().toLowerCase();
           list = list.filter((task) => `${task.title} ${task.notes}`.toLowerCase().includes(needle));
@@ -666,7 +775,7 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
           if (byPriority !== 0) return byPriority;
           return (a.due ?? '9999-99-99').localeCompare(b.due ?? '9999-99-99') || a.order - b.order;
         });
-      }, [tasks, projectId, query]);
+      }, [tasks, projectId, query, smart]);
 
       const moveStatus = async (task, status) => {
         if (!task || task.status === status) return;
@@ -702,13 +811,113 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
         }
       };
 
+      const pickTask = (task, event) => {
+        const shift = Boolean(event?.shiftKey);
+        const order = (view === 'board' ? boardTasks : visible).map((item) => item.id);
+        setSelected((prev) => {
+          const next = new Set(prev);
+          if (shift && lastPickRef.current) {
+            const from = order.indexOf(lastPickRef.current);
+            const to = order.indexOf(task.id);
+            if (from >= 0 && to >= 0) {
+              for (let index = Math.min(from, to); index <= Math.max(from, to); index += 1) next.add(order[index]);
+              lastPickRef.current = task.id;
+              return next;
+            }
+          }
+          if (next.has(task.id)) next.delete(task.id);
+          else next.add(task.id);
+          lastPickRef.current = task.id;
+          return next;
+        });
+      };
+
+      const restoreTasks = async (snapshots) => {
+        const items = (Array.isArray(snapshots) ? snapshots : []).filter((item) => item?.title);
+        if (!items.length) return;
+        try {
+          await rpc('task.bulkAdd', { projectId: items[0].projectId, tasks: items });
+          await refresh();
+          toast(`已撤销，恢复 ${items.length} 条任务`);
+        } catch (cause) {
+          toast(`撤销失败：${cause?.message ?? '未知错误'}`);
+        }
+      };
+
       const remove = async (task) => {
         try {
-          await rpc('task.delete', { id: task.id });
+          const result = await rpc('task.delete', { id: task.id });
           setEditing(null);
           await refresh();
+          const snapshot = result?.task ?? task;
+          toast(`已删除「${snapshot.title}」`, {
+            actionText: '撤销',
+            timeout: 8000,
+            onAction: () => void restoreTasks([snapshot]),
+          });
         } catch (cause) {
           toast(`删除失败：${cause?.message ?? '未知错误'}`);
+        }
+      };
+
+      const bulkStatus = async (status) => {
+        const ids = [...selected];
+        if (!ids.length) return;
+        try {
+          await rpc('task.bulkUpdate', { ids, patch: { status } });
+          setSelected(new Set());
+          await refresh();
+          toast(`已把 ${ids.length} 条任务改为「${STATUS_LABEL[status]}」`);
+        } catch (cause) {
+          toast(`批量修改失败：${cause?.message ?? '未知错误'}`);
+        }
+      };
+
+      const bulkMove = async (targetId) => {
+        const ids = [...selected];
+        if (!ids.length) return;
+        try {
+          await rpc('task.bulkUpdate', { ids, patch: { projectId: targetId } });
+          setSelected(new Set());
+          await refresh();
+          const name = projects.find((project) => project.id === targetId)?.name ?? '项目';
+          toast(`已移动 ${ids.length} 条任务到「${name}」`);
+        } catch (cause) {
+          toast(`批量移动失败：${cause?.message ?? '未知错误'}`);
+        }
+      };
+
+      const bulkRemove = async () => {
+        const ids = [...selected];
+        if (!ids.length) return;
+        try {
+          const removed = await rpc('task.bulkDelete', { ids });
+          setSelected(new Set());
+          await refresh();
+          toast(`已删除 ${ids.length} 条任务`, {
+            actionText: '撤销',
+            timeout: 8000,
+            onAction: () => void restoreTasks(removed ?? []),
+          });
+        } catch (cause) {
+          toast(`批量删除失败：${cause?.message ?? '未知错误'}`);
+        }
+      };
+
+      const dropRow = async (targetId, before) => {
+        if (!rowDrag || rowDrag === targetId) return;
+        const order = visible.map((task) => task.id);
+        if (!order.includes(rowDrag)) return;
+        const next = order.filter((id) => id !== rowDrag);
+        let index = next.indexOf(targetId);
+        if (index < 0) index = next.length;
+        if (!before) index += 1;
+        next.splice(index, 0, rowDrag);
+        try {
+          await rpc('task.reorder', { ids: next });
+          await refresh();
+        } catch (cause) {
+          toast(`排序失败：${cause?.message ?? '未知错误'}`);
         }
       };
 
@@ -734,9 +943,26 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
           if (projectId === project.id) setProjectId('all');
           await refresh();
           const removed = result?.deletedTasks ?? 0;
-          toast(`已删除项目「${project.name}」${removed ? `，同时删除 ${removed} 个任务` : ''}`);
+          toast(`已删除项目「${project.name}」${removed ? `，同时删除 ${removed} 个任务` : ''}`, {
+            actionText: '撤销',
+            timeout: 8000,
+            onAction: () => void restoreProject(result),
+          });
         } catch (cause) {
           toast(`删除项目失败：${cause?.message ?? '未知错误'}`);
+        }
+      };
+
+      const restoreProject = async (result) => {
+        if (!result?.project?.id) return;
+        try {
+          await rpc('project.save', { project: result.project });
+          const tasks = Array.isArray(result.tasks) ? result.tasks : [];
+          if (tasks.length) await rpc('task.bulkAdd', { projectId: result.project.id, tasks });
+          await refresh();
+          toast(`已撤销，恢复项目「${result.project.name}」与 ${tasks.length} 个任务`);
+        } catch (cause) {
+          toast(`撤销失败：${cause?.message ?? '未知错误'}`);
         }
       };
 
@@ -761,6 +987,9 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
         [projects],
       );
 
+      // 换项目/筛选/视图时清空多选，避免选中当前看不见的任务
+      React.useEffect(() => { setSelected(new Set()); }, [projectId, filter, query, view]);
+
       const blankTask = () => ({
         title: '',
         notes: '',
@@ -773,17 +1002,26 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
       return h('div', { className: 'zs-root' },
         h('div', { className: 'zs-col zs-side' },
           h('div', {
-            className: `zs-item${projectId === 'all' ? ' on' : ''}`,
-            onClick: () => setProjectId('all'),
+            className: `zs-item${projectId === 'all' && !smart ? ' on' : ''}`,
+            onClick: () => { setSmart(''); setProjectId('all'); },
           }, h('span', { className: 'zs-dot', style: { background: '#2f6bff' } }), h('span', {}, '全部任务'),
             h('span', { className: 'zs-count' }, String(tasks.filter((task) => task.status !== 'done').length))),
+          h('h4', {}, '智能列表'),
+          SMART_LISTS.map((item) => h('div', {
+            key: item.key,
+            className: `zs-item${smart === item.key ? ' on' : ''}`,
+            onClick: () => { setSmart(item.key); setProjectId('all'); },
+          },
+            h('span', { className: 'zs-dot', style: { background: '#a0a5b8' } }),
+            h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.label),
+            h('span', { className: 'zs-count' }, String(tasks.filter((task) => task.status !== 'done' && matchSmart(task, item.key)).length)))),
           h('h4', {}, '项目'),
           sortedProjects.map((project) => h(ProjectRow, {
             key: project.id,
             project,
             active: projectId === project.id,
             count: openCount(project.id),
-            onClick: () => setProjectId(project.id),
+            onClick: () => { setSmart(''); setProjectId(project.id); },
             onRename: (target) => setProjectDialog({ project: target }),
             onDelete: (target) => setProjectToDelete(target),
             draggable: true,
@@ -804,7 +1042,12 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
             h('span', { style: { width: 8 } }), '+ 新建项目')),
         h('div', { className: 'zs-col zs-main' },
           h('div', { className: 'zs-bar' },
-            h('div', { className: 'zs-title' }, t('panel', '待办任务')),
+            h('div', { className: 'zs-title' },
+              smart
+                ? (SMART_LISTS.find((item) => item.key === smart)?.label ?? t('panel', '待办任务'))
+                : projectId === 'all'
+                  ? t('panel', '待办任务')
+                  : (sortedProjects.find((project) => project.id === projectId)?.name ?? t('panel', '待办任务'))),
             h('input', {
               className: 'zs-input zs-search',
               placeholder: '搜索任务…',
@@ -834,12 +1077,36 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
                   h('rect', { x: 9.75, y: 4, width: 4.5, height: 11, rx: 1.2 }),
                   h('rect', { x: 16.5, y: 4, width: 4.5, height: 7.5, rx: 1.2 })))),
             view === 'list'
-              ? h('div', { className: 'zs-tabs' },
-                ['open', 'all', 'done'].map((key) => h('div', {
-                  key,
-                  className: `zs-tab${filter === key ? ' on' : ''}`,
-                  onClick: () => setFilter(key),
-                }, key === 'open' ? '进行中' : key === 'all' ? '全部' : '已完成')))
+              ? h('div', { className: 'zs-views', title: '列表排序' },
+                h('button', {
+                  className: `zs-view${sortMode === 'default' ? ' on' : ''}`,
+                  style: { width: 'auto', padding: '0 7px', fontSize: 11 },
+                  title: '默认排序：未完成在前，按优先级与到期',
+                  'aria-pressed': sortMode === 'default',
+                  onClick: () => setSort('default'),
+                }, '默认'),
+                h('button', {
+                  className: `zs-view${sortMode === 'custom' ? ' on' : ''}`,
+                  style: { width: 'auto', padding: '0 7px', fontSize: 11 },
+                  title: '自定义排序：拖拽任务行调整顺序',
+                  'aria-pressed': sortMode === 'custom',
+                  onClick: () => setSort('custom'),
+                }, '自定义'))
+              : null,
+            view === 'list'
+              ? (smart
+                ? h('div', { className: 'zs-tabs' },
+                  h('div', {
+                    className: 'zs-tab on',
+                    title: '清除智能列表筛选',
+                    onClick: () => setSmart(''),
+                  }, `${SMART_LISTS.find((item) => item.key === smart)?.label ?? '智能列表'} ✕`))
+                : h('div', { className: 'zs-tabs' },
+                  ['open', 'all', 'done'].map((key) => h('div', {
+                    key,
+                    className: `zs-tab${filter === key ? ' on' : ''}`,
+                    onClick: () => setFilter(key),
+                  }, key === 'open' ? '进行中' : key === 'all' ? '全部' : '已完成'))))
               : null,
             h('button', { className: 'zs-btn pri zs-newtask', onClick: () => setEditing(blankTask()) }, '+ 新建任务'),
             h('button', {
@@ -854,6 +1121,26 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
               },
                 h('circle', { cx: 12, cy: 12, r: 3 }),
                 h('path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' })))),
+          selected.size ? h('div', { className: 'zs-bulk' },
+            h('span', { className: 'zs-bulk-count' }, `已选 ${selected.size} 条`),
+            h('button', { className: 'zs-btn', onClick: () => void bulkStatus('done') }, '完成'),
+            h('button', { className: 'zs-btn', onClick: () => void bulkStatus('todo') }, '待办'),
+            h('button', { className: 'zs-btn', onClick: () => void bulkStatus('doing') }, '进行中'),
+            h('button', { className: 'zs-btn', onClick: () => void bulkStatus('blocked') }, '受阻'),
+            h('select', {
+              className: 'zs-select',
+              style: { width: 132, flex: '0 0 132px' },
+              value: '',
+              onChange: (event) => { if (event.target.value) void bulkMove(event.target.value); },
+            },
+              h('option', { value: '' }, '移动到…'),
+              sortedProjects.map((project) => h('option', { key: project.id, value: project.id }, project.name))),
+            h('button', { className: 'zs-btn danger', onClick: () => void bulkRemove() }, '删除'),
+            h('button', {
+              className: 'zs-btn ghost',
+              onClick: () => setSelected(new Set((view === 'board' ? boardTasks : visible).map((task) => task.id))),
+            }, '全选'),
+            h('button', { className: 'zs-btn ghost', onClick: () => setSelected(new Set()) }, '取消选择')) : null,
           view === 'board'
             ? h('div', { className: 'zs-board' },
               BOARD_COLUMNS.map((status) => {
@@ -895,6 +1182,9 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
                       },
                       onDragEnd: () => { setCardDrag(''); setDropCol(''); },
                       onOpen: (item) => setEditing(item),
+                      picked: selected.has(task.id),
+                      onPick: pickTask,
+                      selecting: selected.size > 0,
                     })));
               }))
             : h('div', { className: 'zs-list' },
@@ -909,6 +1199,34 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
                       project: projects.find((project) => project.id === task.projectId),
                       onToggle: toggle,
                       onOpen: (item) => setEditing(item),
+                      picked: selected.has(task.id),
+                      onPick: pickTask,
+                      selecting: selected.size > 0,
+                      reorderable: sortMode === 'custom',
+                      dragging: rowDrag === task.id,
+                      dropBefore: rowDrop?.id === task.id && rowDrop.before && rowDrag !== task.id,
+                      dropAfter: rowDrop?.id === task.id && !rowDrop.before && rowDrag !== task.id,
+                      onDragStart: (event) => {
+                        setRowDrag(task.id);
+                        try {
+                          event.dataTransfer.effectAllowed = 'move';
+                          event.dataTransfer.setData('text/plain', task.id);
+                        } catch { /* 某些环境不允许写 dataTransfer */ }
+                      },
+                      onDragOver: (event) => {
+                        event.preventDefault();
+                        const rect = event.currentTarget.getBoundingClientRect();
+                        const before = event.clientY < rect.top + rect.height / 2;
+                        setRowDrop((prev) => (prev?.id === task.id && prev.before === before ? prev : { id: task.id, before }));
+                      },
+                      onDrop: (event) => {
+                        event.preventDefault();
+                        const before = rowDrop?.id === task.id ? rowDrop.before : true;
+                        setRowDrag('');
+                        setRowDrop(null);
+                        void dropRow(task.id, before);
+                      },
+                      onDragEnd: () => { setRowDrag(''); setRowDrop(null); },
                     })))),
         editing ? h('div', { key: 'backdrop', className: 'zs-drawer-mask', onClick: () => setEditing(null) }) : null,
         editing ? h(Editor, {
@@ -938,7 +1256,7 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
         }) : null,
         settingsOpen ? h(SettingsDialog, {
           settings,
-          model: '',
+          model,
           rpc,
           onClose: () => setSettingsOpen(false),
           onChanged: () => { void refresh(); },
@@ -1003,25 +1321,29 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
     }
 
     function SplitDialog({ text, projects, rpc, auto, model, onClose, onSave }) {
-      const [lines, setLines] = React.useState(auto ? '' : splitLines(text).join('\n'));
+      const [drafts, setDrafts] = React.useState(() => (auto ? [] : splitLines(text).map(draftOf)));
       const [projectId, setProjectId] = React.useState(projects[0]?.id ?? '');
       const [status, setStatus] = React.useState(auto ? 'loading' : 'manual');
       const [note, setNote] = React.useState(auto ? `正在用 ${model ?? '你的模型'} 拆分…` : '未调用模型，已按行粗拆，可直接改。');
       const [busy, setBusy] = React.useState(false);
-      const count = lines.split('\n').map((line) => line.trim()).filter(Boolean).length;
+      const count = drafts.filter((draft) => draft.title.trim()).length;
 
       const runAi = React.useCallback(async () => {
         setStatus('loading');
         setNote(`正在用 ${model ?? '你的模型'} 拆分…`);
         try {
           const value = await rpc('task.split', { text, projectId, limit: 12 });
-          const titles = (value.tasks ?? []).map((task) => task.title).filter(Boolean);
-          if (!titles.length) throw new Error('模型没有给出任务');
-          setLines(titles.join('\n'));
-          setNote(`已用 ${value.model ?? model ?? '当前模型'} 拆出 ${titles.length} 条，可直接改。`);
+          const tasks = (value.tasks ?? []).filter((task) => task && String(task.title ?? '').trim());
+          if (!tasks.length) throw new Error('模型没有给出任务');
+          setDrafts(tasks.map((task) => ({
+            title: String(task.title).trim(),
+            notes: String(task.notes ?? ''),
+            priority: PRIORITY_LABEL[task.priority] ? task.priority : 'normal',
+          })));
+          setNote(`已用 ${value.model ?? model ?? '当前模型'} 拆出 ${tasks.length} 条，可直接改。`);
           setStatus('ready');
         } catch (cause) {
-          setLines(splitLines(text).join('\n'));
+          setDrafts(splitLines(text).map(draftOf));
           setStatus('error');
           setNote(`AI 拆分失败：${cause?.message ?? '未知错误'}。已按行粗拆成草稿，可手工修。`);
         }
@@ -1032,12 +1354,12 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
       return h('div', { className: 'zs-mask', onClick: onClose },
         h('div', { className: 'zs-modal', onClick: (event) => event.stopPropagation() },
           h('h3', {}, '把这段回答拆成任务'),
-          h('div', { className: 'zs-hint' }, '每行一条任务，可以直接改。保存后进入所选项目。'),
+          h('div', { className: 'zs-hint' }, '每行一条任务，可以直接改；模型给的说明与优先级会跟着同一行保留。'),
           h('textarea', {
             className: 'zs-area',
             style: { minHeight: 200 },
-            value: lines,
-            onChange: (event) => setLines(event.target.value),
+            value: drafts.map((draft) => draft.title).join('\n'),
+            onChange: (event) => setDrafts((prev) => remapDrafts(prev, event.target.value)),
             placeholder: status === 'loading' ? '正在拆分…' : '',
           }),
           h('div', { className: 'zs-row', style: { alignItems: 'center' } },
@@ -1047,7 +1369,7 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
               onChange: (event) => setProjectId(event.target.value),
             }, projects.map((project) => h('option', { key: project.id, value: project.id }, project.name))),
             h('button', { className: 'zs-btn', disabled: status === 'loading', onClick: () => void runAi() }, '重新拆分'),
-            h('button', { className: 'zs-btn', onClick: () => { setLines(splitLines(text).join('\n')); setNote('已按行粗拆，可手工修。'); } }, '按行粗拆')),
+            h('button', { className: 'zs-btn', onClick: () => { setDrafts(splitLines(text).map(draftOf)); setNote('已按行粗拆，可手工修。'); } }, '按行粗拆')),
           h('div', { className: 'zs-hint', style: status === 'error' ? { color: '#e0a33e' } : undefined }, note),
           h('div', { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
             h('button', { className: 'zs-btn', onClick: onClose }, '取消'),
@@ -1055,9 +1377,13 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
               className: 'zs-btn pri',
               disabled: busy || count === 0,
               onClick: async () => {
+                const items = drafts
+                  .map((draft) => ({ ...draft, title: draft.title.trim() }))
+                  .filter((draft) => draft.title);
+                if (!items.length) return;
                 setBusy(true);
                 try {
-                  await onSave(lines.split('\n').map((line) => line.trim()).filter(Boolean), projectId);
+                  await onSave(items, projectId);
                   onClose();
                 } catch (cause) {
                   toast(`保存失败：${cause?.message ?? '未知错误'}`);
@@ -1110,12 +1436,17 @@ body[data-ds-dark-theme] .zs-root{color-scheme:dark}
         else setAsk(true);
       };
 
-      const save = async (lines, projectId) => {
+      const save = async (items, projectId) => {
+        const source = messageId ? `来源消息：${messageId}` : '';
         await rpc('task.bulkAdd', {
           projectId,
-          tasks: lines.map((title) => ({ title, notes: messageId ? `来源消息：${messageId}` : '' })),
+          tasks: items.map((item) => ({
+            title: item.title,
+            priority: item.priority,
+            notes: [item.notes, source].filter(Boolean).join('\n'),
+          })),
         });
-        toast(`已保存 ${lines.length} 条任务`);
+        toast(`已保存 ${items.length} 条任务`);
       };
 
       return h('span', { className: 'zs-split-wrap' },
