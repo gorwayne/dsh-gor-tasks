@@ -5,7 +5,7 @@
 **Put "things to do" inside DeepSeek Harness: a sidebar entry, project buckets, task edits from chat, and one click to turn an answer into tasks.**
 
 <img src="https://img.shields.io/badge/for-DeepSeek%20Harness-4176E6?style=flat" alt="DeepSeek Harness">
-<img src="https://img.shields.io/badge/version-1.3.0-2f6bff?style=flat" alt="1.3.0">
+<img src="https://img.shields.io/badge/version-1.3.1-2f6bff?style=flat" alt="1.3.1">
 <img src="https://img.shields.io/badge/license-MIT-3c9d6c?style=flat" alt="MIT">
 
 [中文](README.md) · **English**
